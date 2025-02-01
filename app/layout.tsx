@@ -13,6 +13,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <script async src="https://cdn.seline.so/seline.js" data-token="258f27de7e76d0d"></script>
       <body>{children}</body>
     </html>
   )
