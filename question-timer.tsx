@@ -9,8 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Check, Forward, Clock, Brain, X, AlertTriangle } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { shuffleQuotes } from "./quotes"
-import type { Quote, QuestionTime } from "./types"
+import type { QuestionTime } from "./types"
 
 export default function QuestionTimer() {
   const [phase, setPhase] = useState<"setup" | "timing" | "result">("setup")
@@ -23,22 +22,8 @@ export default function QuestionTimer() {
   const [correctMarks, setCorrectMarks] = useState<number>(4)
   const [negativeMarks, setNegativeMarks] = useState<number>(1)
   const [currentRemark, setCurrentRemark] = useState<string>("")
-  const [currentQuote, setCurrentQuote] = useState<Quote>(shuffleQuotes()[0])
   const warningCount = useRef(0)
   const totalMarks = history.reduce((sum, item) => sum + item.marks, 0)
-
-  // Quote rotation
-  useEffect(() => {
-    const shuffledQuotes = shuffleQuotes()
-    let currentIndex = 0
-
-    const interval = setInterval(() => {
-      currentIndex = (currentIndex + 1) % shuffledQuotes.length
-      setCurrentQuote(shuffledQuotes[currentIndex])
-    }, 60000)
-
-    return () => clearInterval(interval)
-  }, [])
 
   // Continuous timer for total time
   useEffect(() => {
@@ -161,15 +146,6 @@ export default function QuestionTimer() {
             <h1 className="text-2xl font-bold">Study Timer</h1>
           </div>
         </div>
-
-        <Card className="bg-muted">
-          <CardContent className="pt-6">
-            <blockquote className="space-y-2">
-              <p className="text-lg">&ldquo;{currentQuote.quote}&rdquo;</p>
-              <footer className="text-sm text-muted-foreground">— {currentQuote.author}</footer>
-            </blockquote>
-          </CardContent>
-        </Card>
 
         <div className="grid gap-4 md:grid-cols-2">
           <Card>
