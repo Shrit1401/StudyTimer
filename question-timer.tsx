@@ -1,29 +1,54 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Check, Forward, Clock, Brain, Maximize2, Minimize2 } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import { Check, Forward, Clock, Brain, X, AlertTriangle } from "lucide-react"
 import Link from "next/link"
-
-interface QuestionTime {
-  questionNumber: number
-  timeSpent: number
-  targetTime: number
-  status: "completed" | "passed"
-}
+import { toast } from "sonner"
+import { shuffleQuotes } from "./quotes"
+import type { Quote, QuestionTime } from "./types"
 
 export default function QuestionTimer() {
   const [phase, setPhase] = useState<"setup" | "timing" | "result">("setup")
   const [targetTime, setTargetTime] = useState<number>(5)
   const [currentTime, setCurrentTime] = useState<number>(0)
+  const [totalTime, setTotalTime] = useState<number>(0)
   const [isRunning, setIsRunning] = useState<boolean>(false)
   const [questionNumber, setQuestionNumber] = useState<number>(1)
   const [history, setHistory] = useState<QuestionTime[]>([])
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [correctMarks, setCorrectMarks] = useState<number>(4)
+  const [negativeMarks, setNegativeMarks] = useState<number>(1)
+  const [currentRemark, setCurrentRemark] = useState<string>("")
+  const [currentQuote, setCurrentQuote] = useState<Quote>(shuffleQuotes()[0])
+  const warningCount = useRef(0)
+  const totalMarks = history.reduce((sum, item) => sum + item.marks, 0)
 
+  // Quote rotation
+  useEffect(() => {
+    const shuffledQuotes = shuffleQuotes()
+    let currentIndex = 0
+
+    const interval = setInterval(() => {
+      currentIndex = (currentIndex + 1) % shuffledQuotes.length
+      setCurrentQuote(shuffledQuotes[currentIndex])
+    }, 60000)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  // Continuous timer for total time
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTotalTime((prev) => prev + 1)
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Question timer
   useEffect(() => {
     let interval: NodeJS.Timeout
     if (isRunning) {
@@ -34,15 +59,25 @@ export default function QuestionTimer() {
     return () => clearInterval(interval)
   }, [isRunning])
 
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen()
-      setIsFullscreen(true)
-    } else {
-      document.exitFullscreen()
-      setIsFullscreen(false)
+  // Window blur detection
+  useEffect(() => {
+    if (!isRunning) return
+
+    const handleBlur = () => {
+      warningCount.current += 1
+      if (warningCount.current <= 2) {
+        toast.warning(`Warning ${warningCount.current}/2: Please stay in the window!`, {
+          description: "Your question will be marked as wrong after 2 warnings.",
+        })
+      } else {
+        completeQuestion("wrong")
+        toast.error("Question marked as wrong due to multiple window switches!")
+      }
     }
-  }
+
+    window.addEventListener("blur", handleBlur)
+    return () => window.removeEventListener("blur", handleBlur)
+  }, [isRunning])
 
   const startQuestion = () => {
     if (phase === "setup") {
@@ -50,16 +85,18 @@ export default function QuestionTimer() {
     }
     setCurrentTime(0)
     setIsRunning(true)
-    // Automatically go fullscreen when starting
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen()
-      setIsFullscreen(true)
-    }
+    warningCount.current = 0
   }
 
-  const completeQuestion = (status: "completed" | "passed") => {
+  const completeQuestion = (status: "completed" | "passed" | "wrong") => {
     setIsRunning(false)
     setPhase("result")
+    setCurrentRemark("")
+
+    let marks = 0
+    if (status === "completed") marks = correctMarks
+    if (status === "wrong") marks = -negativeMarks
+
     setHistory((prev) => [
       ...prev,
       {
@@ -67,11 +104,17 @@ export default function QuestionTimer() {
         timeSpent: currentTime,
         targetTime: targetTime * 60,
         status,
+        marks,
       },
     ])
   }
 
   const nextQuestion = () => {
+    const updatedHistory = [...history]
+    if (currentRemark) {
+      updatedHistory[updatedHistory.length - 1].remark = currentRemark
+    }
+    setHistory(updatedHistory)
     setQuestionNumber((prev) => prev + 1)
     setPhase("timing")
     startQuestion()
@@ -86,18 +129,27 @@ export default function QuestionTimer() {
   const formatTotalTime = (seconds: number): string => {
     const hours = Math.floor(seconds / 3600)
     const minutes = Math.floor((seconds % 3600) / 60)
-    return `${hours}h ${minutes}m`
+    const secs = seconds % 60
+    return `${hours}h ${minutes}m ${secs}s`
   }
 
-  const getTotalStudyTime = () => {
-    return history.reduce((total, item) => total + item.timeSpent, 0)
-  }
-
-  const getTimeStatus = (spent: number, target: number, status: "completed" | "passed") => {
+  const getTimeStatus = (spent: number, target: number, status: "completed" | "passed" | "wrong") => {
+    if (status === "wrong") return "text-destructive"
     if (status === "passed") return "text-blue-500"
     if (spent <= target) return "text-green-500"
     if (spent <= target * 1.5) return "text-yellow-500"
     return "text-red-500"
+  }
+
+  const getStatusIcon = (status: "completed" | "passed" | "wrong") => {
+    switch (status) {
+      case "completed":
+        return <Check className="h-5 w-5 text-green-500" />
+      case "passed":
+        return <Forward className="h-5 w-5 text-blue-500" />
+      case "wrong":
+        return <X className="h-5 w-5 text-destructive" />
+    }
   }
 
   return (
@@ -108,24 +160,42 @@ export default function QuestionTimer() {
             <Brain className="h-6 w-6" />
             <h1 className="text-2xl font-bold">Study Timer</h1>
           </div>
-          {phase === "timing" && (
-            <Button variant="outline" size="icon" onClick={toggleFullscreen} className="rounded-full">
-              {isFullscreen ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
-            </Button>
-          )}
         </div>
 
-        <Card>
+        <Card className="bg-muted">
           <CardContent className="pt-6">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <Clock className="h-5 w-5 text-primary" />
-                <span className="font-semibold">Total Study Time</span>
-              </div>
-              <span className="text-xl font-bold">{formatTotalTime(getTotalStudyTime())}</span>
-            </div>
+            <blockquote className="space-y-2">
+              <p className="text-lg">&ldquo;{currentQuote.quote}&rdquo;</p>
+              <footer className="text-sm text-muted-foreground">— {currentQuote.author}</footer>
+            </blockquote>
           </CardContent>
         </Card>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-primary" />
+                  <span className="font-semibold">Total Time</span>
+                </div>
+                <span className="text-xl font-bold">{formatTotalTime(totalTime)}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5 text-primary" />
+                  <span className="font-semibold">Total Score</span>
+                </div>
+                <span className="text-xl font-bold">{totalMarks}</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
         {phase === "setup" && (
           <Card>
@@ -141,10 +211,29 @@ export default function QuestionTimer() {
                   min="1"
                   value={targetTime}
                   onChange={(e) => setTargetTime(Number(e.target.value))}
-                  className="text-lg"
                 />
               </div>
-              <Button onClick={startQuestion} className="w-full text-lg">
+              <div className="space-y-2">
+                <Label htmlFor="correctMarks">Marks for correct answer</Label>
+                <Input
+                  id="correctMarks"
+                  type="number"
+                  min="0"
+                  value={correctMarks}
+                  onChange={(e) => setCorrectMarks(Number(e.target.value))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="negativeMarks">Negative marking</Label>
+                <Input
+                  id="negativeMarks"
+                  type="number"
+                  min="0"
+                  value={negativeMarks}
+                  onChange={(e) => setNegativeMarks(Number(e.target.value))}
+                />
+              </div>
+              <Button onClick={startQuestion} className="w-full">
                 Start First Question
               </Button>
             </CardContent>
@@ -163,11 +252,14 @@ export default function QuestionTimer() {
               <div className="flex items-center justify-center py-12">
                 <div className="text-8xl font-bold tabular-nums tracking-tighter">{formatTime(currentTime)}</div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <Button onClick={() => completeQuestion("completed")} className="w-full h-16 text-lg" variant="default">
-                  <Check className="mr-2 h-6 w-6" /> Complete
+              <div className="grid grid-cols-3 gap-3">
+                <Button onClick={() => completeQuestion("completed")} className="w-full h-16" variant="default">
+                  <Check className="mr-2 h-6 w-6" /> Correct
                 </Button>
-                <Button onClick={() => completeQuestion("passed")} className="w-full h-16 text-lg" variant="secondary">
+                <Button onClick={() => completeQuestion("wrong")} className="w-full h-16" variant="destructive">
+                  <X className="mr-2 h-6 w-6" /> Wrong
+                </Button>
+                <Button onClick={() => completeQuestion("passed")} className="w-full h-16" variant="secondary">
                   <Forward className="mr-2 h-6 w-6" /> Pass
                 </Button>
               </div>
@@ -179,7 +271,12 @@ export default function QuestionTimer() {
           <Card>
             <CardHeader>
               <CardTitle>
-                Question {questionNumber} {history[history.length - 1]?.status === "passed" ? "Passed" : "Complete"}
+                Question {questionNumber}{" "}
+                {history[history.length - 1]?.status === "passed"
+                  ? "Passed"
+                  : history[history.length - 1]?.status === "wrong"
+                    ? "Wrong"
+                    : "Complete"}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -192,8 +289,19 @@ export default function QuestionTimer() {
                 <div className="mt-4 text-center text-lg text-muted-foreground">
                   Target time was {formatTime(targetTime * 60)}
                 </div>
+                <div className="mt-2 text-center font-semibold">Marks: {history[history.length - 1]?.marks}</div>
               </div>
-              <Button onClick={nextQuestion} className="w-full h-16 text-lg">
+              <div className="space-y-2">
+                <Label htmlFor="remark">Add a remark (optional)</Label>
+                <Textarea
+                  id="remark"
+                  placeholder="Write any notes or remarks about this question..."
+                  value={currentRemark}
+                  onChange={(e) => setCurrentRemark(e.target.value)}
+                  className="min-h-[100px]"
+                />
+              </div>
+              <Button onClick={nextQuestion} className="w-full h-16">
                 Start Next Question
               </Button>
             </CardContent>
@@ -208,17 +316,23 @@ export default function QuestionTimer() {
             <CardContent>
               <div className="space-y-2">
                 {history.map((item) => (
-                  <div
-                    key={item.questionNumber}
-                    className="flex items-center justify-between rounded-lg border p-4 text-lg"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span>Question {item.questionNumber}</span>
-                      {item.status === "passed" && <Forward className="h-5 w-5 text-blue-500" />}
+                  <div key={item.questionNumber} className="space-y-2 rounded-lg border p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span>Question {item.questionNumber}</span>
+                        {getStatusIcon(item.status)}
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className="text-muted-foreground">
+                          {item.marks > 0 ? "+" : ""}
+                          {item.marks}
+                        </span>
+                        <span className={getTimeStatus(item.timeSpent, item.targetTime, item.status)}>
+                          {formatTime(item.timeSpent)}
+                        </span>
+                      </div>
                     </div>
-                    <span className={getTimeStatus(item.timeSpent, item.targetTime, item.status)}>
-                      {formatTime(item.timeSpent)}
-                    </span>
+                    {item.remark && <p className="text-sm text-muted-foreground border-t pt-2 mt-2">{item.remark}</p>}
                   </div>
                 ))}
               </div>
